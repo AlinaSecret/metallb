@@ -20,6 +20,7 @@ import (
 	"go.universe.tf/metallb/internal/ipfamily"
 	"go.universe.tf/metallb/internal/logging"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 )
 
 // As the MetalLB controller should handle messages synchronously, there should
@@ -252,6 +253,11 @@ func (sm *sessionManager) createConfig() (*frrConfig, error) {
 
 			family := ipfamily.ForAddress(net.ParseIP(host))
 
+			var connectTime *uint64
+			if s.ConnectTime != nil {
+				connectTime = ptr.To(uint64(*s.ConnectTime / time.Second))
+			}
+
 			neighbor = &neighborConfig{
 				IPFamily:       family,
 				ASN:            s.PeerASN,
@@ -259,6 +265,7 @@ func (sm *sessionManager) createConfig() (*frrConfig, error) {
 				Port:           uint16(portUint),
 				HoldTime:       uint64(s.HoldTime / time.Second),
 				KeepaliveTime:  uint64(s.KeepAliveTime / time.Second),
+				ConnectTime:    connectTime,
 				Password:       s.Password,
 				Advertisements: make([]*advertisementConfig, 0),
 				BFDProfile:     s.BFDProfile,
