@@ -5,6 +5,7 @@ package bgptests
 import (
 	"context"
 	"fmt"
+	types "github.com/onsi/gomega/types"
 	"net"
 	"strconv"
 	"strings"
@@ -355,4 +356,25 @@ func isRouteInjected(pods []*corev1.Pod, pairingFamily ipfamily.Family, routeToC
 		}
 	}
 	return false, ""
+}
+
+func validateFRRConfig(cs clientset.Interface, matcher types.GomegaMatcher) {
+	speakerPods, err := metallb.SpeakerPods(cs)
+	framework.ExpectNoError(err)
+
+	for _, pod := range speakerPods {
+		podExecutor, err := FRRProvider.FRRExecutorFor(pod.Namespace, pod.Name)
+		framework.ExpectNoError(err)
+
+		Eventually(func() string {
+			// We need to assert against the output of the command as a bare string, as
+			// there is no json version of the command.
+			cfgStr, err := podExecutor.Exec("vtysh", "-c", "show running-config")
+			if err != nil {
+				return err.Error()
+			}
+
+			return cfgStr
+		}, 1*time.Minute).Should(matcher)
+	}
 }

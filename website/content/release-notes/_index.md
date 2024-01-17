@@ -5,6 +5,10 @@ weight: 8
 
 ## Next release
 
+New features:
+
+- Add option to configure BGP connect time ([PR_2144](https://github.com/metallb/metallb/pull))
+
 Chores:
 
 - Enforce adding a release notes entry on each PR ([PR 2191](https://github.com/metallb/metallb/pull/2191))

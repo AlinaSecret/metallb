@@ -37,6 +37,7 @@ import (
 	"go.universe.tf/e2etest/pkg/pointer"
 	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
 	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
+	"k8s.io/utils/ptr"
 
 	"go.universe.tf/e2etest/pkg/frr"
 	frrconfig "go.universe.tf/e2etest/pkg/frr/config"
@@ -1374,47 +1375,44 @@ var _ = ginkgo.Describe("BGP", func() {
 			for i := range resources.Peers {
 				resources.Peers[i].Spec.KeepaliveTime = metav1.Duration{Duration: 13 * time.Second}
 				resources.Peers[i].Spec.HoldTime = metav1.Duration{Duration: 57 * time.Second}
+				resources.Peers[i].Spec.ConnectTime = ptr.To(metav1.Duration{Duration: time.Second})
 			}
 
 			err := ConfigUpdater.Update(resources)
 			framework.ExpectNoError(err)
 
-			speakerPods, err := metallb.SpeakerPods(cs)
-			framework.ExpectNoError(err)
-
-			for _, pod := range speakerPods {
-				podExecutor, err := FRRProvider.FRRExecutorFor(pod.Namespace, pod.Name)
-				framework.ExpectNoError(err)
-
-				Eventually(func() string {
-					// We need to assert against the output of the command as a bare string, as
-					// there is no json version of the command.
-					cfgStr, err := podExecutor.Exec("vtysh", "-c", "show running-config")
-					if err != nil {
-						return err.Error()
-					}
-
-					return cfgStr
-				}, 1*time.Minute).Should(
-					And(
-						ContainSubstring("log file /etc/frr/frr.log"),
-						WithTransform(substringCount("\n profile fullbfdprofile1"), Equal(1)),
-						ContainSubstring("receive-interval 93"),
-						ContainSubstring("transmit-interval 95"),
-						MatchRegexp("echo.*interval 97"), // TODO: this is backward compatible to 7.5, let's remove it when we consolidate the frr version
-						ContainSubstring("minimum-ttl 253"),
-						ContainSubstring("passive-mode"),
-						ContainSubstring("echo-mode"),
-						ContainSubstring("timers 13 57"),
-					),
-				)
-			}
+			configMatcher := And(
+				ContainSubstring("log file /etc/frr/frr.log"),
+				WithTransform(substringCount("\n profile fullbfdprofile1"), Equal(1)),
+				ContainSubstring("receive-interval 93"),
+				ContainSubstring("transmit-interval 95"),
+				MatchRegexp("echo.*interval 97"), // TODO: this is backward compatible to 7.5, let's remove it when we consolidate the frr version
+				ContainSubstring("minimum-ttl 253"),
+				ContainSubstring("passive-mode"),
+				ContainSubstring("echo-mode"),
+				ContainSubstring("timers 13 57"),
+			)
+			validateFRRConfig(cs, configMatcher)
 
 			ginkgo.By("Checking the default value on the bgppeer crds is set")
 			peer := metallbv1beta2.BGPPeer{}
 			err = ConfigUpdater.Client().Get(context.Background(), types.NamespacedName{Name: "defaultport", Namespace: metallb.Namespace}, &peer)
 			framework.ExpectNoError(err)
 			framework.ExpectEqual(peer.Spec.Port, uint16(179))
+		})
+		// Until BGP peer connect time feature is added to frrk8s test is set to FRR-MODE:
+		ginkgo.It("FRR-MODE BGP Peer connect time", func() {
+			connectTime := time.Second * 5
+			resources := config.Resources{
+				Peers: metallb.PeersForContainers(FRRContainers, ipfamily.IPv4, func(p *metallbv1beta2.BGPPeer) {
+					p.Spec.ConnectTime = ptr.To(metav1.Duration{Duration: connectTime})
+				}),
+			}
+			err := ConfigUpdater.Update(resources)
+			framework.ExpectNoError(err)
+
+			validateFRRConfig(cs, ContainSubstring(fmt.Sprintf("timers connect %d", int(connectTime.Seconds()))))
+
 		})
 	})
 	ginkgo.DescribeTable("A service of protocol load balancer should work with two protocols", func(pairingIPFamily ipfamily.Family, poolAddresses []string) {
